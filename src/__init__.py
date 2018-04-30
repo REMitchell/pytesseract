@@ -1,6 +1,8 @@
-try:
-    from pytesseract import image_to_string
-    from pytesseract import image_to_data
-    from pytesseract import image_to_boxes
-except ImportError:
-    from pytesseract.pytesseract import image_to_string
+from .pytesseract import (
+    image_to_string,
+    image_to_data,
+    image_to_boxes,
+    image_to_osd,
+    TesseractError,
+    Output
+)

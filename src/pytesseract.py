@@ -2,7 +2,6 @@
 
 '''
 Python-tesseract. For more information: https://github.com/madmaze/pytesseract
-
 '''
 
 try:
@@ -22,10 +21,23 @@ numpy_installed = True if find_loader('numpy') is not None else False
 if numpy_installed:
     from numpy import ndarray
 
-__all__ = ['image_to_string', 'image_to_boxes', 'image_to_data']
-
 # CHANGE THIS IF TESSERACT IS NOT IN YOUR PATH, OR IS NAMED DIFFERENTLY
 tesseract_cmd = 'tesseract'
+RGB_MODE = 'RGB'
+OSD_KEYS = {
+    'Page number': ('page_num', int),
+    'Orientation in degrees': ('orientation', int),
+    'Rotate': ('rotate', int),
+    'Orientation confidence': ('orientation_conf', float),
+    'Script': ('script', str),
+    'Script confidence': ('script_conf', float)
+}
+
+
+class Output:
+    STRING = "string"
+    BYTES = "bytes"
+    DICT = "dict"
 
 
 class TesseractError(Exception):
@@ -43,7 +55,7 @@ def get_errors(error_string):
 
 def cleanup(temp_name):
     ''' Tries to remove files by filename wildcard path. '''
-    for filename in iglob(temp_name + '*'):
+    for filename in iglob(temp_name + '*' if temp_name else temp_name):
         try:
             os.remove(filename)
         except OSError:
@@ -60,16 +72,48 @@ def prepare(image):
     raise TypeError('Unsupported image object')
 
 
-def save_image(image, boxes=False):
+def save_image(image):
     image = prepare(image)
-    if len(image.getbands()) == 4:
-        # In case we have 4 channels, lets discard the Alpha.
-        image = image.convert('RGB')
+
+    img_extension = image.format
+    if image.format not in {'JPEG', 'PNG', 'TIFF', 'BMP', 'GIF'}:
+        img_extension = 'PNG'
+
+    if not image.mode.startswith(RGB_MODE):
+        image = image.convert(RGB_MODE)
+
+    if 'A' in image.getbands():
+        # discard and replace the alpha channel with white background
+        background = Image.new(RGB_MODE, image.size, (255, 255, 255))
+        background.paste(image, (0, 0), image)
+        image = background
 
     temp_name = tempfile.mktemp(prefix='tess_')
-    input_file_name = temp_name + '.bmp'
-    image.save(input_file_name)
-    return temp_name
+    input_file_name = temp_name + os.extsep + img_extension
+    image.save(input_file_name, format=img_extension, **image.info)
+    return temp_name, input_file_name
+
+
+def subprocess_args(include_stdout=True):
+    # See https://github.com/pyinstaller/pyinstaller/wiki/Recipe-subprocess
+    # for reference and comments.
+
+    kwargs = {
+        'stdin': subprocess.PIPE,
+        'stderr': subprocess.PIPE,
+        'startupinfo': None,
+        'env': None
+    }
+
+    if hasattr(subprocess, 'STARTUPINFO'):
+        kwargs['startupinfo'] = subprocess.STARTUPINFO()
+        kwargs['startupinfo'].dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kwargs['env'] = os.environ
+
+    if include_stdout:
+        kwargs['stdout'] = subprocess.PIPE
+
+    return kwargs
 
 
 def run_tesseract(input_filename,
@@ -93,31 +137,40 @@ def run_tesseract(input_filename,
     if extension != 'box':
         command.append(extension)
 
-    proc = subprocess.Popen(command, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(command, **subprocess_args())
     status_code, error_string = proc.wait(), proc.stderr.read()
     proc.stderr.close()
 
     if status_code:
-        raise TesseractError(status, get_errors(error_string))
+        raise TesseractError(status_code, get_errors(error_string))
 
     return True
 
 
-def run_and_get_output(image, extension, lang=None, config='', nice=None):
-    temp_name = ''
+def run_and_get_output(image,
+                       extension,
+                       lang=None,
+                       config='',
+                       nice=None,
+                       return_bytes=False):
+
+    temp_name, input_filename = '', ''
     try:
-        temp_name = save_image(image)
-        arguments = {
-            'input_filename': temp_name+'.bmp',
-            'output_filename_base': temp_name+'_out',
+        temp_name, input_filename = save_image(image)
+        kwargs = {
+            'input_filename': input_filename,
+            'output_filename_base': temp_name + '_out',
             'extension': extension,
             'lang': lang,
             'config': config,
             'nice': nice
         }
 
-        run_tesseract(**arguments)
-        with open(output_filename_base+'.'+extension, 'rb') as output_file:
+        run_tesseract(**kwargs)
+        filename = kwargs['output_filename_base'] + os.extsep + extension
+        with open(filename, 'rb') as output_file:
+            if return_bytes:
+                return output_file.read()
             return output_file.read().decode('utf-8').strip()
     finally:
         cleanup(temp_name)
@@ -130,6 +183,11 @@ def file_to_dict(tsv, cell_delimiter, str_col_idx):
         return result
 
     header = rows.pop(0)
+    if rows and len(rows[-1]) < len(header):
+        # Fixes bug that occurs when last text string in TSV is null, and
+        # last row is missing a final cell in TSV file
+        rows[-1].append('')
+
     if str_col_idx < 0:
         str_col_idx += len(header)
 
@@ -141,7 +199,34 @@ def file_to_dict(tsv, cell_delimiter, str_col_idx):
     return result
 
 
-def image_to_string(image, lang=None, config='', nice=0, boxes=False):
+def is_valid(val, _type):
+    if _type is int:
+        return val.isdigit()
+
+    if _type is float:
+        try:
+            float(val)
+            return True
+        except ValueError:
+            return False
+
+    return True
+
+
+def osd_to_dict(osd):
+    return {
+        OSD_KEYS[kv[0]][0]: OSD_KEYS[kv[0]][1](kv[1]) for kv in (
+            line.split(': ') for line in osd.split('\n')
+        ) if len(kv) == 2 and is_valid(kv[1], OSD_KEYS[kv[0]][1])
+    }
+
+
+def image_to_string(image,
+                    lang=None,
+                    config='',
+                    nice=0,
+                    boxes=False,
+                    output_type=Output.STRING):
     '''
     Returns the result of a Tesseract OCR run on the provided image to string
     '''
@@ -149,35 +234,72 @@ def image_to_string(image, lang=None, config='', nice=0, boxes=False):
         # Added for backwards compatibility
         print('\nWarning: Argument \'boxes\' is deprecated and will be removed'
               ' in future versions. Use function image_to_boxes instead.\n')
-        return image_to_boxes(image, lang, config, nice)
+        return image_to_boxes(image, lang, config, nice, output_type)
+
+    if output_type == Output.DICT:
+        return {'text': run_and_get_output(image, 'txt', lang, config, nice)}
+    elif output_type == Output.BYTES:
+        return run_and_get_output(image, 'txt', lang, config, nice, True)
+
     return run_and_get_output(image, 'txt', lang, config, nice)
 
 
-def image_to_boxes(image, lang=None, config='', nice=0, dict_output=False):
+def image_to_boxes(image,
+                   lang=None,
+                   config='',
+                   nice=0,
+                   output_type=Output.STRING):
     '''
     Returns string containing recognized characters and their box boundaries
     '''
-    config += 'batch.nochop makebox'
-    result = run_and_get_output(image, 'box', lang, config, nice)
+    config += ' batch.nochop makebox'
 
-    if not dict_output:
-        return result
+    if output_type == Output.DICT:
+        box_header = 'char left bottom right top page\n'
+        return file_to_dict(
+            box_header + run_and_get_output(
+                image, 'box', lang, config, nice), ' ', 0)
+    elif output_type == Output.BYTES:
+        return run_and_get_output(image, 'box', lang, config, nice, True)
 
-    box_header = 'char left bottom right top page\n'
-    return file_to_dict(box_header + result, ' ', 0)
+    return run_and_get_output(image, 'box', lang, config, nice)
 
 
-def image_to_data(image, lang=None, config='', nice=0, dict_output=False):
+def image_to_data(image,
+                  lang=None,
+                  config='',
+                  nice=0,
+                  output_type=Output.STRING):
     '''
     Returns string containing box boundaries, confidences,
     and other information. Requires Tesseract 3.05+
     '''
+    if output_type == Output.DICT:
+        return file_to_dict(
+            run_and_get_output(image, 'tsv', lang, config, nice), '\t', -1)
+    elif output_type == Output.BYTES:
+        return run_and_get_output(image, 'tsv', lang, config, nice, True)
 
-    result = run_and_get_output(image, 'tsv', lang, config, nice)
-    if not dict_output:
-        return result
+    return run_and_get_output(image, 'tsv', lang, config, nice)
 
-    return file_to_dict(result, '\t', -1)
+
+def image_to_osd(image,
+                 lang=None,
+                 config='',
+                 nice=0,
+                 output_type=Output.STRING):
+    '''
+    Returns string containing the orientation and script detection (OSD)
+    '''
+    config += ' --psm 0'
+
+    if output_type == Output.DICT:
+        return osd_to_dict(
+            run_and_get_output(image, 'osd', lang, config, nice))
+    elif output_type == Output.BYTES:
+        return run_and_get_output(image, 'osd', lang, config, nice, True)
+
+    return run_and_get_output(image, 'osd', lang, config, nice)
 
 
 def main():

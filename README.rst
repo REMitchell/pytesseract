@@ -1,6 +1,21 @@
 Python Tesseract
 ================
 
+.. image:: https://img.shields.io/pypi/v/pytesseract.svg
+   :target: https://pypi.python.org/pypi/pytesseract
+   :alt: PyPI release
+
+
+.. image:: 	https://img.shields.io/github/release/madmaze/pytesseract.svg
+   :target: https://github.com/madmaze/pytesseract/releases
+   :alt: Github release
+
+
+.. image:: https://img.shields.io/pypi/pyversions/pytesseract.svg
+   :target: https://pypi.python.org/pypi/pytesseract
+   :alt: PyPI version
+
+
 Python-tesseract is an optical character recognition (OCR) tool for python.
 That is, it will recognize and "read" the text embedded in images.
 
@@ -40,6 +55,9 @@ USAGE
     # Get verbose data including boxes, confidences, line and page numbers
     print(pytesseract.image_to_data(Image.open('test.png')))
     
+    # Get informations about orientation and script detection
+    print(pytesseract.image_to_osd(Image.open('test.png'))
+    
 Support for OpenCV image/NumPy array objects
 
 .. code-block:: python
@@ -66,23 +84,25 @@ Add the following config, if you have tessdata error like: "Error opening data f
 
 * **image_to_string** Returns the result of a Tesseract OCR run on the image to string
 
-* **image_to_boxes** Returns string output containing recognized characters and their box boundaries
+* **image_to_boxes** Returns result containing recognized characters and their box boundaries
 
-* **image_to_data** Returns string output containing box boundaries, confidences, and other information. Requires Tesseract 3.05+. See `Tesseract TSV documentation <https://github.com/tesseract-ocr/tesseract/wiki/Command-Line-Usage#tsv-output-currently-available-in-305-dev-in-master-branch-on-github>`_ for more information: 
+* **image_to_data** Returns result containing box boundaries, confidences, and other information. Requires Tesseract 3.05+. For more information, please check the `Tesseract TSV documentation <https://github.com/tesseract-ocr/tesseract/wiki/Command-Line-Usage#tsv-output-currently-available-in-305-dev-in-master-branch-on-github>`_
+
+* **image_to_osd** Returns result containing informations about orientation and script detection.
 
 **Parameters**
 
-``image_to_data(image, lang=None, config='', nice=0, dict_output=False)``
+``image_to_data(image, lang=None, config='', nice=0, output_type=Output.STRING)``
 
-* **image** PIL image file for the image to be processed by Tesseract
+* **image** Object, PIL Image/NumPy array of the image to be processed by Tesseract
 
-* **lang** Tesseract language code string
+* **lang** String, Tesseract language code string
 
-* **config** Any additional configurations as a string, ex: ``config="-psm 6"``
+* **config** String, Any additional configurations as a string, ex: ``config='--psm 6'``
 
-* **nice** Boolean, modifies the processor priority for the Tesseract run. Not supported on Windows. Nice adjusts the niceness of unix-like processes.
+* **nice** Integer, modifies the processor priority for the Tesseract run. Not supported on Windows. Nice adjusts the niceness of unix-like processes.
 
-* **dict_output** Boolean, if ``True`` will return dictionary containing headers pointing to list columns of data. Used for ``image_to_boxes`` and ``image_to_data`` only
+* **output_type** Class attribute, specifies the type of the output, defaults to ``string``. For the full list of all supported types, please check the definition of `pytesseract.Output <https://github.com/madmaze/pytesseract/blob/master/src/pytesseract.py>`_ class.
 
 
 INSTALLATION
@@ -97,12 +117,12 @@ Prerequisites:
   (additional info how to install the engine on Linux, Mac OSX and Windows).
   You must be able to invoke the tesseract command as *tesseract*. If this
   isn't the case, for example because tesseract isn't in your PATH, you will
-  have to change the "tesseract_cmd" variable at the top of *tesseract.py*.
+  have to change the "tesseract_cmd" variable ``pytesseract.pytesseract.tesseract_cmd``.
   Under Debian/Ubuntu you can use the package **tesseract-ocr**. 
   For Mac OS users. please install homebrew package **tesseract**.
 
 | Installing via pip:
-See the `pytesseract package page <https://pypi.python.org/pypi/pytesseract>`_ for more information.
+Check the `pytesseract package page <https://pypi.python.org/pypi/pytesseract>`_ for more information.
 
 .. code-block:: bash
 
@@ -112,14 +132,14 @@ See the `pytesseract package page <https://pypi.python.org/pypi/pytesseract>`_ f
 
 .. code-block:: bash
 
-    $ (env)> pip install git+https://github.com/madmaze/pytesseract.git
+    $ (env)> pip install -U git+https://github.com/madmaze/pytesseract.git
 
 | Installing from source:
 
 .. code-block:: bash
 
     $> git clone https://github.com/madmaze/pytesseract.git
-    $ (env)> cd pytesseract && pip install .
+    $ (env)> cd pytesseract && pip install -U .
 
 LICENSE
 -------
